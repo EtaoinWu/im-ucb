@@ -75,6 +75,10 @@ int main(int argc, char **argv) {
       .help("Evaluation mode")
       .default_value(false)
       .implicit_value(true);
+  program.add_argument("--lt")
+      .help("Linear threshold diffusion")
+      .default_value(false)
+      .implicit_value(true);
 
   try {
     program.parse_args(argc, argv);
@@ -84,13 +88,20 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  auto type = DiffusionType::IndependentCascade;
+
   auto dataset = program.get<string>("dataset");
   auto k = program.get<int>("k");
   auto eps = program.get<double>("eps");
   auto delta = program.get<double>("delta");
   auto n_top = program.get<int>("--n_top");
   auto eval = program.get<bool>("--eval");
+  auto lt = program.get<bool>("--lt");
   set_identity(format("{} {}", dataset, k));
+
+  if (lt) {
+    type = DiffusionType::LinearThreshold;
+  }
 
   auto dataset_path = format("data/{}/{}.txt", dataset, dataset);
   if (!std::filesystem::exists(dataset_path)) {
@@ -102,7 +113,7 @@ int main(int argc, char **argv) {
   if (!eval) {
     {
       auto cbgreedy =
-          GreedyCBDiffusion(g, DiffusionType::IndependentCascade, n_top, eps,
+          GreedyCBDiffusion(g, type, n_top, eps,
                             delta, greedy_cb<DiffusionReward>);
       auto result = cbgreedy.run(10 * k + 3);
       save_result(result, dataset, "greedy-cb", k, cbgreedy.used_samples());
@@ -110,7 +121,7 @@ int main(int argc, char **argv) {
 
     {
       auto celf_cb =
-          GreedyCBDiffusion(g, DiffusionType::IndependentCascade, n_top, eps,
+          GreedyCBDiffusion(g, type, n_top, eps,
                             delta, greedy_cb_lazy<DiffusionReward>);
       auto celf_result = celf_cb.run(10 * k + 4);
       save_result(celf_result, dataset, "celf-cb", k, celf_cb.used_samples());
@@ -118,7 +129,7 @@ int main(int argc, char **argv) {
 
     {
       auto celf =
-          GreedyDiffusion(g, DiffusionType::IndependentCascade, n_top, eps,
+          GreedyDiffusion(g, type, n_top, eps,
                           delta, greedy_lazy_forward<DiffusionEvaluate>);
       auto result = celf.run(10 * k + 2);
       save_result(result, dataset, "celf", k, celf.used_samples());
@@ -126,7 +137,7 @@ int main(int argc, char **argv) {
 
     if (g.n <= 40) {
       auto greedy =
-          GreedyDiffusion(g, DiffusionType::IndependentCascade, n_top, eps,
+          GreedyDiffusion(g, type, n_top, eps,
                           delta, greedy_submodular<DiffusionEvaluate>);
       auto result = greedy.run(10 * k + 1);
       save_result(result, dataset, "greedy", k, greedy.used_samples());
@@ -139,7 +150,7 @@ int main(int argc, char **argv) {
       size_t cnt = 0;
       size_t last_cnt = 0;
       while (true) {
-        auto result = solver.run(DiffusionType::IndependentCascade, S);
+        auto result = solver.run(type, S);
         total += result;
         total_sq += result * result;
         if (cnt > 100) {
@@ -151,10 +162,8 @@ int main(int argc, char **argv) {
           auto confidence = 1.96 * std / sqrt(cnt);
           if (cnt > last_cnt * 3.1622) {
             last_cnt = cnt;
-            // std::cout << format("Evaluating iteration {}, std {}", cnt, std)
-            //           << std::endl;
           }
-          if (confidence < 3e-3 || confidence < 1e-4 * mean) {
+          if (confidence < eps || confidence < eps * mean) {
             break;
           }
         }

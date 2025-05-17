@@ -90,8 +90,8 @@ template <typename Confidence, typename Reward> struct UCB {
       }
       if (conf(num_pulls[i]) < eps) {
         my_log(std::format(
-            "UCB stops at round {} with arm {} due to {} pulls, confidence bound {} < {}",
-            t, i, num_pulls[i], conf(num_pulls[i]), eps));
+            "UCB stops at round {} with arm {} due to {} pulls, confidence bound {} < {}, avg reward {}",
+            t, i, num_pulls[i], conf(num_pulls[i]), eps, mean_rewards[i]));
         return i;
       }
     }
