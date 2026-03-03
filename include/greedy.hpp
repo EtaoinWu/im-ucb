@@ -48,7 +48,7 @@ template <SubmodularFn Fn>
   for (int i = 1; i <= k; i++) {
     my_log(std::format("greedy_submodular i: {}", i));
     int best = -1;
-    double best_value = -std::numeric_limits<double>::infinity();
+    double best_value = std::numeric_limits<double>::lowest();
     for (int j = 0; j < n; j++) {
       if (selected[j])
         continue;
@@ -75,7 +75,7 @@ template <SubmodularIncrementFn Fn>
   // the CELF algorithm
   std::vector<char> selected(n, false);
   std::vector<int> visited(n, 0);
-  std::vector<double> upper_bounds(n, std::numeric_limits<double>::infinity());
+  std::vector<double> upper_bounds(n, std::numeric_limits<double>::max());
   std::vector<int> result;
   int time = 0;
   for (int i = 1; i <= k; i++) {

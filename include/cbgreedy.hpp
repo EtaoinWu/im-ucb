@@ -49,59 +49,127 @@ concept CBGreedyReward = requires(Fn& fn, int i) {
 static_assert(CBGreedyReward<DiffusionReward>,
               "DiffusionReward does not satisfy CBGreedyReward");
 
-template <CBGreedyReward Fn>
-[[nodiscard]] auto greedy_cb(Fn& f, int n, int k, double eps, double delta)
-    -> std::vector<int> {
-  using Tracker = LILConfidenceBoundTracker;
+struct VarianceTrackerConfig {
+  bool enabled;
+  double eta;
+  double m;
+  double s;
+  VarianceTrackerConfig(bool enabled = false,
+                        double eta = 2.280,
+                        double m = 1.0,
+                        double s = 1.418)
+      : enabled(enabled), eta(eta), m(m), s(s) {}
+};
+
+template <typename Tracker>
+struct CBTrackerFactory;
+
+template <>
+struct CBTrackerFactory<LILConfidenceBoundTracker> {
+  [[nodiscard]] static auto make(int n,
+                                 double delta,
+                                 const VarianceTrackerConfig&)
+      -> LILConfidenceBoundTracker {
+    return LILConfidenceBoundTracker(0.03, delta / n, n / 2.0, 0.5, 0.0,
+                                     static_cast<double>(n));
+  }
+};
+
+template <>
+struct CBTrackerFactory<PolyStitchingConfidenceBoundTracker> {
+  [[nodiscard]] static auto make(int n,
+                                 double delta,
+                                 const VarianceTrackerConfig& variance_config)
+      -> PolyStitchingConfidenceBoundTracker {
+    return PolyStitchingConfidenceBoundTracker(
+        delta / n, variance_config.eta, variance_config.m, variance_config.s,
+        0.0, static_cast<double>(n));
+  }
+};
+
+template <typename Tracker>
+concept CBGreedyTracker =
+    ConfidenceBoundTracker<Tracker> &&
+    requires(int n, double delta, const VarianceTrackerConfig& config) {
+      {
+        CBTrackerFactory<Tracker>::make(n, delta, config)
+      } -> std::same_as<Tracker>;
+    };
+
+template <CBGreedyTracker Tracker>
+[[nodiscard]] auto build_trackers(int n,
+                                  double delta,
+                                  const VarianceTrackerConfig& variance_config)
+    -> std::vector<Tracker> {
   std::vector<Tracker> trackers;
   trackers.reserve(n);
   for (int i = 0; i < n; i++) {
-    trackers.emplace_back(0.03, delta / n, n / 2.0, 0.5, 0.0,
-                          static_cast<double>(n));
+    trackers.push_back(
+        CBTrackerFactory<Tracker>::make(n, delta, variance_config));
   }
+  return trackers;
+}
+
+template <CBGreedyTracker Tracker, CBGreedyReward Fn>
+[[nodiscard]] auto run_greedy_cb(Fn& f,
+                                 int n,
+                                 int k,
+                                 double eps,
+                                 double delta,
+                                 const VarianceTrackerConfig& variance_config,
+                                 bool lazy_mode,
+                                 std::string_view log_prefix)
+    -> std::vector<int> {
+  auto trackers = build_trackers<Tracker>(n, delta, variance_config);
   UCB<Tracker, Fn> ucb(n, 3.0, eps, f, std::move(trackers), true);
   std::vector<char> selected(n, false);
   std::vector<int> result;
   for (int i = 1; i <= k; i++) {
-    my_log(std::format("greedy_cb i: {}", i));
-    ucb.reset();
-    ucb.enable_all_arms();
-    for (int j = 0; j < n; j++) {
-      if (selected[j])
-        ucb.disable_arm(j);
+    my_log(std::format("{} i: {}", log_prefix, i));
+    if (!lazy_mode) {
+      ucb.reset();
+      ucb.enable_all_arms();
+      for (int j = 0; j < n; j++) {
+        if (selected[j])
+          ucb.disable_arm(j);
+      }
     }
     auto x = ucb.best_arm();
     selected[x] = true;
     result.push_back(x);
     f.add_fixed(x);
     f.checkpoint();
+    if (lazy_mode) {
+      ucb.disable_arm(x);
+    }
   }
   return result;
 }
 
-template <CBGreedyReward Fn>
-[[nodiscard]] auto greedy_cb_lazy(Fn& f, int n, int k, double eps, double delta)
+template <CBGreedyReward Fn,
+          CBGreedyTracker Tracker = LILConfidenceBoundTracker>
+[[nodiscard]] auto greedy_cb(Fn& f,
+                             int n,
+                             int k,
+                             double eps,
+                             double delta,
+                             VarianceTrackerConfig variance_config = {})
     -> std::vector<int> {
-  using Tracker = LILConfidenceBoundTracker;
-  std::vector<Tracker> trackers;
-  trackers.reserve(n);
-  for (int i = 0; i < n; i++) {
-    trackers.emplace_back(0.03, delta / n, n / 2.0, 0.5, 0.0,
-                          static_cast<double>(n));
-  }
-  UCB<Tracker, Fn> ucb(n, 3.0, eps, f, std::move(trackers), true);
-  std::vector<char> selected(n, false);
-  std::vector<int> result;
-  for (int i = 1; i <= k; i++) {
-    my_log(std::format("greedy_cb_lazy i: {}", i));
-    auto x = ucb.best_arm();
-    selected[x] = true;
-    result.push_back(x);
-    f.add_fixed(x);
-    f.checkpoint();
-    ucb.disable_arm(x);
-  }
-  return result;
+  return run_greedy_cb<Tracker>(f, n, k, eps, delta, variance_config, false,
+                                "greedy_cb");
+}
+
+template <CBGreedyReward Fn,
+          CBGreedyTracker Tracker = LILConfidenceBoundTracker>
+[[nodiscard]] auto greedy_cb_lazy(Fn& f,
+                                  int n,
+                                  int k,
+                                  double eps,
+                                  double delta,
+                                  VarianceTrackerConfig variance_config = {})
+    -> std::vector<int> {
+  return run_greedy_cb<Tracker>(f, n, k, eps, delta, variance_config, true,
+                                "greedy_cb_lazy");
 }
 
 template <typename GreedyCB>
@@ -111,7 +179,15 @@ concept GreedyCBSelector = requires(const GreedyCB& cb,
                                     int k,
                                     double eps,
                                     double delta) {
-  { cb(reward, n, k, eps, delta) } -> std::same_as<std::vector<int>>;
+  requires(
+      requires {
+        { cb(reward, n, k, eps, delta) } -> std::same_as<std::vector<int>>;
+      } ||
+      requires {
+        {
+          cb(reward, n, k, eps, delta, VarianceTrackerConfig{})
+        } -> std::same_as<std::vector<int>>;
+      });
 };
 
 template <GreedyCBSelector GreedyCB>
@@ -144,7 +220,17 @@ struct GreedyCBDiffusion {
   [[nodiscard]] auto run(seed_type seed) -> std::vector<int> {
     solver.seed(seed);
     auto reward = DiffusionReward(solver, type);
-    auto result = cb_fn(reward, n, k, eps, delta);
+    auto result = [&] {
+      if constexpr (requires {
+                      {
+                        cb_fn(reward, n, k, eps, delta)
+                      } -> std::same_as<std::vector<int>>;
+                    }) {
+        return cb_fn(reward, n, k, eps, delta);
+      } else {
+        return cb_fn(reward, n, k, eps, delta, VarianceTrackerConfig{});
+      }
+    }();
     total_samples += reward.samples;
     used_samples_.insert(used_samples_.end(), reward.used_samples.begin(),
                          reward.used_samples.end());
@@ -171,3 +257,4 @@ using im::DiffusionReward;
 using im::greedy_cb;
 using im::greedy_cb_lazy;
 using im::GreedyCBDiffusion;
+using im::VarianceTrackerConfig;

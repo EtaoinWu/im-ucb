@@ -148,6 +148,8 @@ int main(int argc, char** argv) {
   auto g = *std::move(graph_result);
 
   if (!eval) {
+    auto var_conf = VarianceTrackerConfig(true, 2.280, 1.0, 1.418);
+
     {
       auto cbgreedy = GreedyCBDiffusion(g, type, n_top, eps, delta,
                                         greedy_cb<DiffusionReward>);
@@ -167,6 +169,48 @@ int main(int argc, char** argv) {
                                celf_cb.used_samples());
       if (!saved) {
         log_io_error("Failed to save celf-cb", saved.error());
+      }
+    }
+
+    {
+      auto greedy_cb_var =
+          [&](DiffusionReward& reward, int n, int k, double local_eps,
+              double local_delta) {
+            return greedy_cb<DiffusionReward,
+                             PolyStitchingConfidenceBoundTracker>(
+                reward, n, k, local_eps, local_delta,
+                VarianceTrackerConfig(true, var_conf.eta, var_conf.m,
+                                      var_conf.s));
+          };
+      auto cbgreedy_var =
+          GreedyCBDiffusion(g, type, n_top, eps, delta, greedy_cb_var);
+      auto result = cbgreedy_var.run(10 * k + 5);
+      auto saved = save_result(result, dataset, "greedy-cb-var", k,
+                               cbgreedy_var.used_samples());
+      if (!saved) {
+        log_io_error("Failed to save greedy-cb-var", saved.error());
+      }
+    }
+
+    {
+      auto celf_cb_var = [&](DiffusionReward& reward,
+                             int n,
+                             int k,
+                             double local_eps,
+                             double local_delta) {
+        return greedy_cb_lazy<DiffusionReward,
+                    PolyStitchingConfidenceBoundTracker>(
+          reward, n, k, local_eps, local_delta,
+          VarianceTrackerConfig(true, var_conf.eta, var_conf.m,
+                      var_conf.s));
+      };
+      auto celfcb_var =
+          GreedyCBDiffusion(g, type, n_top, eps, delta, celf_cb_var);
+      auto result = celfcb_var.run(10 * k + 6);
+      auto saved = save_result(result, dataset, "celf-cb-var", k,
+                               celfcb_var.used_samples());
+      if (!saved) {
+        log_io_error("Failed to save celf-cb-var", saved.error());
       }
     }
 
@@ -220,7 +264,9 @@ int main(int argc, char** argv) {
       return total / cnt;
     };
 
-    for (std::string_view alg : {"greedy-cb", "celf-cb", "celf", "greedy"}) {
+    for (std::string_view alg :
+       {"greedy-cb", "celf-cb", "greedy-cb-var", "celf-cb-var", "celf",
+        "greedy"}) {
       auto result = load_result(dataset, alg, k);
       if (!result) {
         std::cerr << "Result for " << alg << " " << k

@@ -22,7 +22,7 @@ add_compile_options(
 
 # Set debug/release flags
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
-set(CMAKE_CXX_FLAGS_RELEASE "-Ofast")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math")
 
 # Include directories
 include_directories(include)

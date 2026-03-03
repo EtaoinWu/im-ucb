@@ -2,24 +2,14 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cmath>
 #include <concepts>
 #include <format>
-#include <limits>
-#include <numbers>
 #include <vector>
 
+#include "confidence_bound.hpp"
 #include "log.hpp"
 
 namespace im {
-
-inline constexpr double E = std::numbers::e_v<double>;
-inline constexpr double infty = std::numeric_limits<double>::infinity();
-
-template <typename Fn>
-concept ConfidenceRadius = requires(const Fn& fn, size_t t) {
-  { fn(t) } -> std::convertible_to<double>;
-};
 
 template <typename Tracker>
 concept ConfidenceBoundTracker = requires(Tracker& tracker, double sample) {
@@ -36,93 +26,8 @@ concept ArmReward = requires(Reward& reward, int arm) {
   { reward(arm) } -> std::convertible_to<double>;
 };
 
-struct LILConfidence {
-  double mult;
-  double logkappap1;
-  double logdelta;
-  LILConfidence(double kappa, double delta, double sigma)
-      : mult((1 + std::sqrt(kappa)) * sigma * std::sqrt(2 * (1 + kappa))),
-        logkappap1(std::log(1 + kappa)),
-        logdelta(std::log(delta)) {
-    assert(delta * E < logkappap1);
-  }
-
-  [[nodiscard]] auto operator()(double t) const -> double {
-    return mult *
-           std::sqrt((std::log(logkappap1 + std::log(t)) - logdelta) / t);
-  }
-};
-
-static_assert(ConfidenceRadius<LILConfidence>);
-
-struct LILConfidenceBoundTracker {
-  double beta;
-  LILConfidence radius;
-  double range_low;
-  double range_high;
-  size_t pulls;
-  double sum_rewards;
-  double mean_reward;
-  double capped_ucb;
-
-  LILConfidenceBoundTracker(double kappa = 0.03,
-                            double delta = 1e-3,
-                            double sigma = 1.0,
-                            double beta = 0.5,
-                            double range_low = 0.0,
-                            double range_high = 1.0)
-      : beta(beta),
-        radius(kappa, delta, sigma),
-        range_low(range_low),
-        range_high(range_high),
-        pulls(0),
-        sum_rewards(0),
-        mean_reward(0),
-        capped_ucb(infty) {
-    assert(range_low <= range_high);
-  }
-
-  [[nodiscard]] auto clipped(double value) const -> double {
-    return std::clamp(value, range_low, range_high);
-  }
-
-  auto add_sample(double sample) -> void {
-    auto bounded_sample = clipped(sample);
-    pulls++;
-    sum_rewards += bounded_sample;
-    mean_reward = sum_rewards / pulls;
-    auto instant_ucb = clipped(mean_reward + (1 + beta) * radius(pulls));
-    capped_ucb = std::min(capped_ucb, instant_ucb);
-  }
-
-  auto reset_ucb() -> void { capped_ucb = infty; }
-
-  [[nodiscard]] auto mean() const -> double {
-    if (pulls == 0) {
-      return (range_low + range_high) / 2;
-    }
-    return mean_reward;
-  }
-
-  [[nodiscard]] auto ucb() const -> double {
-    if (pulls == 0) {
-      return range_high;
-    }
-    return clipped(
-        std::min(capped_ucb, mean_reward + (1 + beta) * radius(pulls)));
-  }
-
-  [[nodiscard]] auto lcb() const -> double {
-    if (pulls == 0) {
-      return range_low;
-    }
-    return clipped(mean_reward - radius(pulls));
-  }
-
-  [[nodiscard]] auto num_pulls() const -> size_t { return pulls; }
-};
-
 static_assert(ConfidenceBoundTracker<LILConfidenceBoundTracker>);
+static_assert(ConfidenceBoundTracker<PolyStitchingConfidenceBoundTracker>);
 
 // UCB is a class that implements the UCB algorithm
 // Tracker: maintains confidence bounds per arm
@@ -272,6 +177,8 @@ struct UCB {
 }  // namespace im
 
 using im::E;
+using im::EmpiricalStitchingBoundary;
+using im::PolyStitchingConfidenceBoundTracker;
 using im::infty;
 using im::LILConfidence;
 using im::LILConfidenceBoundTracker;
