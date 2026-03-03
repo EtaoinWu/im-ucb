@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cassert>
+#include <initializer_list>
 #include <random>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "graph.hpp"
@@ -17,23 +19,29 @@ enum class DiffusionType {
   LinearThreshold,
 };
 
+// The "raw" diffusion calculation logic
+// for both IC and LT models
 struct DiffusionSolver {
-  const Graph &g;
+  const Graph& g;
   RNG rng;
   size_t times;
   std::vector<size_t> last_activated;
   std::vector<int> queue;
   std::vector<double> weights;
-  DiffusionSolver(const Graph &g, seed_type seed)
-      : g(g), rng(seed), times(0), last_activated(g.n, 0), queue(g.n, -1),
+  DiffusionSolver(const Graph& g, seed_type seed)
+      : g(g),
+        rng(seed),
+        times(0),
+        last_activated(g.n, 0),
+        queue(g.n, -1),
         weights(g.n, 0.0) {}
 
-  void seed(seed_type seed) { rng.seed(seed); }
+  auto seed(seed_type seed) -> void { rng.seed(seed); }
 
-private:
-  template <typename Iterator>
-  [[nodiscard]] Iterator pre_activate(Iterator qr, std::span<const int> origin,
-                                      size_t now) {
+ private:
+  [[nodiscard]] auto pre_activate(int* qr,
+                                  std::span<const int> origin,
+                                  size_t now) -> int* {
     for (auto u : origin) {
       if (last_activated[u] < now) {
         last_activated[u] = now;
@@ -43,12 +51,10 @@ private:
     return qr;
   }
 
-  template <typename Iterator>
-  [[nodiscard]] Iterator independent_cascade(Iterator ql, Iterator qr,
-                                             size_t now) {
+  [[nodiscard]] auto independent_cascade(int* ql, int* qr, size_t now) -> int* {
     while (ql != qr) {
       int u = *ql++;
-      for (const auto &e : g[u]) {
+      for (const auto& e : g[u]) {
         int v = e.to;
         if (last_activated[v] < now && u01(rng) < e.weight) {
           last_activated[v] = now;
@@ -59,12 +65,11 @@ private:
     return qr;
   }
 
-  template <typename Iterator>
-  [[nodiscard]] Iterator linear_threshold(Iterator ql, Iterator qr, size_t now,
-                                          size_t then) {
+  [[nodiscard]] auto linear_threshold(int* ql, int* qr, size_t now, size_t then)
+      -> int* {
     while (ql != qr) {
       int u = *ql++;
-      for (const auto &e : g[u]) {
+      for (const auto& e : g[u]) {
         int v = e.to;
         if (last_activated[v] < now) {
           last_activated[v] = now;
@@ -82,28 +87,30 @@ private:
     return qr;
   }
 
-public:
-  [[nodiscard]] double run_independent_cascade(
-      const std::vector<int> &origin, const std::vector<int> &prepare = {}) {
+ public:
+  [[nodiscard]] auto run_independent_cascade(std::span<const int> origin,
+                                             std::span<const int> prepare = {})
+      -> double {
     auto now = ++times;
 
     auto ql = queue.data();
     auto qr = queue.data();
 
     if (!prepare.empty()) {
-      qr = pre_activate(qr, std::span<const int>(prepare), now);
+      qr = pre_activate(qr, prepare, now);
       qr = independent_cascade(ql, qr, now);
       ql = qr;
     }
 
-    qr = pre_activate(qr, std::span<const int>(origin), now);
+    qr = pre_activate(qr, origin, now);
     qr = independent_cascade(ql, qr, now);
 
     return static_cast<double>(qr - ql);
   }
 
-  [[nodiscard]] double run_linear_threshold(
-      const std::vector<int> &origin, const std::vector<int> &prepare = {}) {
+  [[nodiscard]] auto run_linear_threshold(std::span<const int> origin,
+                                          std::span<const int> prepare = {})
+      -> double {
     auto now = ++times;
     auto then = ++times;
 
@@ -111,32 +118,59 @@ public:
     auto qr = queue.data();
 
     if (!prepare.empty()) {
-      qr = pre_activate(qr, std::span<const int>(prepare), then);
+      qr = pre_activate(qr, prepare, then);
       qr = linear_threshold(ql, qr, now, then);
       ql = qr;
     }
 
-    qr = pre_activate(qr, std::span<const int>(origin), then);
+    qr = pre_activate(qr, origin, then);
     qr = linear_threshold(ql, qr, now, then);
 
     return static_cast<double>(qr - ql);
   }
 
-  [[nodiscard]] double run(DiffusionType type, const std::vector<int> &origin,
-                           const std::vector<int> &prepare = {}) {
+  // workaround: for some reason `initializer_list`s are not `span`s by default
+  [[nodiscard]] auto run_independent_cascade(
+      std::initializer_list<int> origin,
+      std::initializer_list<int> prepare = {}) -> double {
+    return run_independent_cascade(std::span<const int>(origin),
+                                   std::span<const int>(prepare));
+  }
+
+  [[nodiscard]] auto run_linear_threshold(
+      std::initializer_list<int> origin,
+      std::initializer_list<int> prepare = {}) -> double {
+    return run_linear_threshold(std::span<const int>(origin),
+                                std::span<const int>(prepare));
+  }
+
+  [[nodiscard]] auto run(DiffusionType type,
+                         std::span<const int> origin,
+                         std::span<const int> prepare = {}) -> double {
     switch (type) {
-    case DiffusionType::IndependentCascade:
-      return run_independent_cascade(origin, prepare);
-    case DiffusionType::LinearThreshold:
-      return run_linear_threshold(origin, prepare);
-    default:
-      assert(false);
-      return 0.0;
+      case DiffusionType::IndependentCascade:
+        return run_independent_cascade(origin, prepare);
+      case DiffusionType::LinearThreshold:
+        return run_linear_threshold(origin, prepare);
     }
+    std::unreachable();
+  }
+
+  [[nodiscard]] auto run(DiffusionType type,
+                         std::initializer_list<int> origin,
+                         std::initializer_list<int> prepare = {}) -> double {
+    return run(type, std::span<const int>(origin),
+               std::span<const int>(prepare));
+  }
+
+  [[nodiscard]] auto run(DiffusionType type,
+                         int origin,
+                         std::span<const int> prepare = {}) -> double {
+    return run(type, std::span<const int>(&origin, 1), prepare);
   }
 };
 
-} // namespace im
+}  // namespace im
 
 using DiffusionType = im::DiffusionType;
 using DiffusionSolver = im::DiffusionSolver;

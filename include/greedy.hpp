@@ -4,7 +4,10 @@
 #include <cmath>
 #include <concepts>
 #include <format>
+#include <iostream>
 #include <limits>
+#include <ranges>
+#include <span>
 #include <vector>
 
 #include "diffusion.hpp"
@@ -14,15 +17,32 @@
 
 namespace im {
 
-// submodular optimization framework
-// A submodular function is a function f: std::vector<int> -> double
-// such that for any S, T, f(S) + f(T) >= f(S ∪ T) + f(S ∩ T)
-// A monotone submodular function is a submodular function that is
-// non-decreasing
+template <typename Fn>
+concept Checkpointable = requires(Fn& fn) {
+  { fn.checkpoint() } -> std::same_as<void>;
+};
 
 template <typename Fn>
-  requires std::invocable<Fn, std::vector<int>>
-std::vector<int> greedy_submodular(const Fn &f, int n, int k) {
+concept SubmodularFn = requires(const Fn& fn, const std::vector<int>& set) {
+  // submodularity: f(S) + f(T) >= f(S ∪ T) + f(S ∩ T)
+  // monotonicity: f(S) <= f(T) for S ⊆ T
+  { fn(set) } -> std::convertible_to<double>;
+};
+
+template <typename Fn>
+concept SubmodularIncrementFn = requires(const Fn& fn,
+                                         const std::vector<int>& delta,
+                                         const std::vector<int>& base) {
+  // calculate incremental value: f(base ∪ delta) - f(base)
+  // submodularity: f(A, S) >= f(B, S) for A ⊆ B
+  // monotonicity: f(A, S) >= 0
+  { fn(delta, base) } -> std::convertible_to<double>;
+};
+
+template <SubmodularFn Fn>
+[[nodiscard]] auto greedy_submodular(const Fn& f, int n, int k)
+    -> std::vector<int> {
+  // the standard greedy algorithm for submodular optimization
   std::vector<char> selected(n, false);
   std::vector<int> result;
   for (int i = 1; i <= k; i++) {
@@ -42,19 +62,17 @@ std::vector<int> greedy_submodular(const Fn &f, int n, int k) {
     }
     selected[best] = true;
     result.push_back(best);
-    if constexpr (requires { f.checkpoint(); }) {
+    if constexpr (Checkpointable<const Fn>) {
       f.checkpoint();
     }
   }
   return result;
 }
 
-template <typename Fn>
-  requires requires(const Fn &fn, const std::vector<int> &a,
-                    const std::vector<int> &b) {
-    { fn(a, b) } -> std::convertible_to<double>;
-  }
-std::vector<int> greedy_lazy_forward(const Fn &f, int n, int k) {
+template <SubmodularIncrementFn Fn>
+[[nodiscard]] auto greedy_lazy_forward(const Fn& f, int n, int k)
+    -> std::vector<int> {
+  // the CELF algorithm
   std::vector<char> selected(n, false);
   std::vector<int> visited(n, 0);
   std::vector<double> upper_bounds(n, std::numeric_limits<double>::infinity());
@@ -65,8 +83,8 @@ std::vector<int> greedy_lazy_forward(const Fn &f, int n, int k) {
     auto now = ++time;
     int next_element = -1;
     while (true) {
-      int max_ub = std::max_element(upper_bounds.begin(), upper_bounds.end()) -
-                   upper_bounds.begin();
+      int max_ub =
+          std::ranges::max_element(upper_bounds) - upper_bounds.begin();
       if (visited[max_ub] < now) {
         auto value = f(std::vector{max_ub}, result);
         upper_bounds[max_ub] = value;
@@ -82,26 +100,30 @@ std::vector<int> greedy_lazy_forward(const Fn &f, int n, int k) {
     selected[next_element] = true;
     result.push_back(next_element);
     upper_bounds[next_element] = -1;
-    if constexpr (requires { f.checkpoint(); }) {
+    if constexpr (Checkpointable<const Fn>) {
       f.checkpoint();
     }
   }
   return result;
 }
 
-struct DiffusionEvaluate {
-  const Graph &g;
+// A wrapper of DiffusionSolver to be used as the reward function for
+// generic submodular optimization algorithms. It exposes a set-function
+// interface.
+struct DiffusionSubmodular {
+  const Graph& g;
   DiffusionType type;
   int repeats;
   mutable RNG rng;
   mutable int n_eval = 0;
   mutable std::vector<size_t> used_evals;
-  DiffusionEvaluate(const Graph &g, DiffusionType type, int repeats)
+  DiffusionSubmodular(const Graph& g, DiffusionType type, int repeats)
       : g(g), type(type), repeats(repeats), rng() {}
-  void seed(seed_type seed) { rng.seed(seed); }
+  auto seed(seed_type seed) -> void { rng.seed(seed); }
 
-  [[nodiscard]] double operator()(const std::vector<int> &origin,
-                                  const std::vector<int> &prepare = {}) const {
+  [[nodiscard]] auto operator()(std::span<const int> origin,
+                                std::span<const int> prepare = {}) const
+      -> double {
     n_eval++;
     auto solver = DiffusionSolver(g, rng());
     double total = 0;
@@ -112,19 +134,44 @@ struct DiffusionEvaluate {
     return total / repeats;
   }
 
-  void checkpoint() const { used_evals.push_back(n_eval); }
+  [[nodiscard]] auto operator()(const std::vector<int>& origin,
+                                const std::vector<int>& prepare = {}) const
+      -> double {
+    return (*this)(std::span<const int>(origin), std::span<const int>(prepare));
+  }
+
+  auto checkpoint() const -> void { used_evals.push_back(n_eval); }
 };
 
-template <typename Greedy> struct GreedyDiffusion {
+static_assert(SubmodularFn<DiffusionSubmodular>);
+static_assert(SubmodularIncrementFn<DiffusionSubmodular>);
+
+template <typename Algo, typename Fn>
+concept SubmodularOptAlgo =
+    SubmodularFn<Fn> && requires(const Algo& algo, Fn& eval, int n, int k) {
+      { algo(eval, n, k) } -> std::same_as<std::vector<int>>;
+    };
+
+template <typename Algo>
+  requires SubmodularOptAlgo<Algo, DiffusionSubmodular>
+struct DiffusionAlgoRun {
   int n;
   int k;
   double eps;
   double delta;
-  const Greedy &greedy;
-  DiffusionEvaluate eval;
-  GreedyDiffusion(const Graph &g, DiffusionType diffusion_type, int k,
-                  double eps, double delta, const Greedy &greedy)
-      : n(g.n), k(k), eps(eps), delta(delta), greedy(greedy),
+  const Algo& alg;
+  DiffusionSubmodular eval;
+  DiffusionAlgoRun(const Graph& g,
+                   DiffusionType diffusion_type,
+                   int k,
+                   double eps,
+                   double delta,
+                   const Algo& alg)
+      : n(g.n),
+        k(k),
+        eps(eps),
+        delta(delta),
+        alg(alg),
         eval(g, diffusion_type, 1) {
     std::cout << "n: " << g.n << std::endl;
     std::cout << "eps: " << eps << std::endl;
@@ -135,18 +182,18 @@ template <typename Greedy> struct GreedyDiffusion {
     eval.repeats = g.n * g.n / (eps * eps) * std::log(g.n * g.n / delta);
   }
 
-  [[nodiscard]] std::vector<int> run(seed_type seed) {
+  [[nodiscard]] auto run(seed_type seed) -> std::vector<int> {
     eval.seed(seed);
-    return greedy(eval, n, k);
+    return alg(eval, n, k);
   }
 
-  [[nodiscard]] size_t samples() const {
+  [[nodiscard]] auto samples() const -> size_t {
     return static_cast<size_t>(eval.n_eval) * eval.repeats;
   }
 
-  [[nodiscard]] std::vector<size_t> used_samples() const {
+  [[nodiscard]] auto used_samples() const -> std::vector<size_t> {
     auto samples = eval.used_evals;
-    for (auto &sample : samples) {
+    for (auto& sample : samples) {
       sample *= eval.repeats;
     }
     return samples;
@@ -154,13 +201,17 @@ template <typename Greedy> struct GreedyDiffusion {
 };
 
 // Type deduction rule
-template <typename Greedy>
-GreedyDiffusion(const Graph &g, DiffusionType diffusion_type, int k, double eps,
-                double delta, const Greedy &greedy) -> GreedyDiffusion<Greedy>;
+template <typename Algo>
+DiffusionAlgoRun(const Graph& g,
+                 DiffusionType diffusion_type,
+                 int k,
+                 double eps,
+                 double delta,
+                 const Algo& alg) -> DiffusionAlgoRun<Algo>;
 
-} // namespace im
+}  // namespace im
 
-using im::DiffusionEvaluate;
-using im::GreedyDiffusion;
+using im::DiffusionAlgoRun;
+using im::DiffusionSubmodular;
 using im::greedy_lazy_forward;
 using im::greedy_submodular;

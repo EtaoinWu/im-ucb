@@ -1,14 +1,15 @@
 #include <fstream>
 #include <format>
 #include <sstream>
-#include <string>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 #include "graph.hpp"
 
 namespace im {
 
-std::expected<Graph, error_t> parse_graph(std::istream &is) {
+auto parse_graph(std::istream &is) -> std::expected<Graph, error_t> {
   int n, m;
   if (!(is >> n >> m)) {
     return std::unexpected("Invalid graph header: expected <n> <m>");
@@ -34,36 +35,36 @@ std::expected<Graph, error_t> parse_graph(std::istream &is) {
   return g;
 }
 
-std::expected<Graph, error_t> load_graph_expected(const std::string &source) {
-  if (source.find('\n') != std::string::npos) {
-    // s is the content of the file
-    auto iss = std::istringstream(source);
+auto load_graph_expected(std::string_view source)
+    -> std::expected<Graph, error_t> {
+  if (source.find('\n') != std::string_view::npos) {
+    // source is the content of the file
+    auto iss = std::istringstream(std::string(source));
     return parse_graph(iss);
   } else {
-    // s is a filename
-    auto filename = source;
-    std::ifstream file(filename);
+    // source is a filename
+    std::ifstream file{std::string(source)};
     if (!file.is_open()) {
-      return std::unexpected("Failed to open file: " + filename);
+      return std::unexpected(std::format("Failed to open file: {}", source));
     }
     return parse_graph(file);
   }
 }
 
-Graph load_graph(std::istream &is) {
+auto load_graph(std::istream &is) -> Graph {
   auto result = parse_graph(is);
   if (!result) {
     throw std::runtime_error(result.error());
   }
-  return std::move(result.value());
+  return *std::move(result);
 }
 
-Graph load_graph(const std::string &source) {
+auto load_graph(std::string_view source) -> Graph {
   auto result = load_graph_expected(source);
   if (!result) {
     throw std::runtime_error(result.error());
   }
-  return std::move(result.value());
+  return *std::move(result);
 }
 
 } // namespace im

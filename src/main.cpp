@@ -19,9 +19,12 @@ namespace {
 using io_result = std::expected<void, std::string>;
 using load_result_t = std::expected<std::vector<int>, std::string>;
 
-io_result save_result(const std::vector<int> &result, std::string_view dataset,
-                      std::string_view alg, int k,
-                      const std::vector<size_t> &used_samples) {
+[[nodiscard]] auto save_result(const std::vector<int>& result,
+                               std::string_view dataset,
+                               std::string_view alg,
+                               int k,
+                               const std::vector<size_t>& used_samples)
+    -> io_result {
   if (result.size() != used_samples.size()) {
     return std::unexpected("result and used_samples have different size");
   }
@@ -34,7 +37,8 @@ io_result save_result(const std::vector<int> &result, std::string_view dataset,
   auto filename = std::format("{}/{}.txt", dir, k);
   std::ofstream f(filename);
   if (!f.is_open()) {
-    return std::unexpected(std::format("Failed to open output file {}", filename));
+    return std::unexpected(
+        std::format("Failed to open output file {}", filename));
   }
 
   for (size_t i = 0; i < result.size(); i++) {
@@ -43,8 +47,9 @@ io_result save_result(const std::vector<int> &result, std::string_view dataset,
   return {};
 }
 
-[[nodiscard]] load_result_t load_result(std::string_view dataset,
-                                        std::string_view alg, int k) {
+[[nodiscard]] auto load_result(std::string_view dataset,
+                               std::string_view alg,
+                               int k) -> load_result_t {
   auto filename = std::format("results/{}/{}/{}.txt", dataset, alg, k);
   if (!std::filesystem::exists(filename)) {
     return std::unexpected(std::format("File {} not found", filename));
@@ -64,28 +69,31 @@ io_result save_result(const std::vector<int> &result, std::string_view dataset,
   return result;
 }
 
-io_result save_eval(std::string_view dataset, std::string_view alg, int k,
-                    const std::vector<double> &means) {
+[[nodiscard]] auto save_eval(std::string_view dataset,
+                             std::string_view alg,
+                             int k,
+                             const std::vector<double>& means) -> io_result {
   auto filename = std::format("results/{}/{}/{}_eval.txt", dataset, alg, k);
   std::ofstream f(filename);
   if (!f.is_open()) {
-    return std::unexpected(std::format("Failed to open output file {}", filename));
+    return std::unexpected(
+        std::format("Failed to open output file {}", filename));
   }
 
   for (size_t i = 0; i < means.size(); i++) {
-    f << means[i] << std::endl;
+    f << means[i] << '\n';
   }
 
   return {};
 }
 
-void log_io_error(const std::string &context, const std::string &error) {
-  std::cerr << context << ": " << error << std::endl;
+auto log_io_error(std::string_view context, std::string_view error) -> void {
+  std::cerr << context << ": " << error << '\n';
 }
 
-} // namespace
+}  // namespace
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   argparse::ArgumentParser program("bandit-im");
   program.add_argument("dataset").help("Dataset to use").required();
   program.add_argument("k").help("Run id").required().scan<'i', int>();
@@ -106,8 +114,8 @@ int main(int argc, char **argv) {
 
   try {
     program.parse_args(argc, argv);
-  } catch (const std::exception &err) {
-    std::cerr << err.what() << std::endl;
+  } catch (const std::exception& err) {
+    std::cerr << err.what() << '\n';
     std::cerr << program;
     return 1;
   }
@@ -129,21 +137,20 @@ int main(int argc, char **argv) {
 
   auto dataset_path = std::format("data/{}/{}.txt", dataset, dataset);
   if (!std::filesystem::exists(dataset_path)) {
-    std::cerr << "Dataset " << dataset << " not found" << std::endl;
+    std::cerr << "Dataset " << dataset << " not found" << '\n';
     return 1;
   }
   auto graph_result = im::load_graph_expected(dataset_path);
   if (!graph_result) {
-    std::cerr << "Failed to load graph: " << graph_result.error() << std::endl;
+    std::cerr << "Failed to load graph: " << graph_result.error() << '\n';
     return 1;
   }
-  auto g = std::move(graph_result.value());
+  auto g = *std::move(graph_result);
 
   if (!eval) {
     {
-      auto cbgreedy =
-          GreedyCBDiffusion(g, type, n_top, eps,
-                            delta, greedy_cb<DiffusionReward>);
+      auto cbgreedy = GreedyCBDiffusion(g, type, n_top, eps, delta,
+                                        greedy_cb<DiffusionReward>);
       auto result = cbgreedy.run(10 * k + 3);
       auto saved =
           save_result(result, dataset, "greedy-cb", k, cbgreedy.used_samples());
@@ -153,21 +160,19 @@ int main(int argc, char **argv) {
     }
 
     {
-      auto celf_cb =
-          GreedyCBDiffusion(g, type, n_top, eps,
-                            delta, greedy_cb_lazy<DiffusionReward>);
+      auto celf_cb = GreedyCBDiffusion(g, type, n_top, eps, delta,
+                                       greedy_cb_lazy<DiffusionReward>);
       auto celf_result = celf_cb.run(10 * k + 4);
-      auto saved =
-          save_result(celf_result, dataset, "celf-cb", k, celf_cb.used_samples());
+      auto saved = save_result(celf_result, dataset, "celf-cb", k,
+                               celf_cb.used_samples());
       if (!saved) {
         log_io_error("Failed to save celf-cb", saved.error());
       }
     }
 
     {
-      auto celf =
-          GreedyDiffusion(g, type, n_top, eps,
-                          delta, greedy_lazy_forward<DiffusionEvaluate>);
+      auto celf = DiffusionAlgoRun(g, type, n_top, eps, delta,
+                                   greedy_lazy_forward<DiffusionSubmodular>);
       auto result = celf.run(10 * k + 2);
       auto saved = save_result(result, dataset, "celf", k, celf.used_samples());
       if (!saved) {
@@ -176,11 +181,11 @@ int main(int argc, char **argv) {
     }
 
     if (g.n <= 40) {
-      auto greedy =
-          GreedyDiffusion(g, type, n_top, eps,
-                          delta, greedy_submodular<DiffusionEvaluate>);
+      auto greedy = DiffusionAlgoRun(g, type, n_top, eps, delta,
+                                     greedy_submodular<DiffusionSubmodular>);
       auto result = greedy.run(10 * k + 1);
-      auto saved = save_result(result, dataset, "greedy", k, greedy.used_samples());
+      auto saved =
+          save_result(result, dataset, "greedy", k, greedy.used_samples());
       if (!saved) {
         log_io_error("Failed to save greedy", saved.error());
       }
@@ -188,7 +193,7 @@ int main(int argc, char **argv) {
   } else {
     auto solver = DiffusionSolver(g, k);
 
-    auto evaluate = [&](const std::vector<int> &S) {
+    auto evaluate = [&](const std::vector<int>& S) -> double {
       auto total = 0.0, total_sq = 0.0;
       size_t cnt = 0;
       size_t last_cnt = 0;
@@ -215,11 +220,11 @@ int main(int argc, char **argv) {
       return total / cnt;
     };
 
-    for (auto alg : {"greedy-cb", "celf-cb", "celf", "greedy"}) {
+    for (std::string_view alg : {"greedy-cb", "celf-cb", "celf", "greedy"}) {
       auto result = load_result(dataset, alg, k);
       if (!result) {
         std::cerr << "Result for " << alg << " " << k
-                  << " not available: " << result.error() << std::endl;
+                  << " not available: " << result.error() << '\n';
         continue;
       }
       std::vector<double> means;
@@ -227,7 +232,7 @@ int main(int argc, char **argv) {
         auto pref = std::vector<int>(result->begin(), result->begin() + i + 1);
         std::cout << std::format("Evaluating {}/{}/{}: size {}", dataset, alg,
                                  k, pref.size())
-                  << std::endl;
+                  << '\n';
         auto mean = evaluate(pref);
         means.push_back(mean);
       }

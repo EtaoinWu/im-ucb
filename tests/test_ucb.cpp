@@ -26,8 +26,13 @@ TEST_CASE("UCB with Gaussian rewards", "[ucb]") {
   auto sigma = 1.0;
   auto seed = 1234567890 + n;
   auto reward = GaussianReward(means, sigma, seed);
-  auto lil = LILConfidence(0.01, 0.001, 2 * sigma);
-  auto ucb = UCB(n, 3.0, 1.0, 0.03 / n, lil, reward);
+  using Tracker = LILConfidenceBoundTracker;
+  std::vector<Tracker> trackers;
+  trackers.reserve(n);
+  for (int i = 0; i < n; i++) {
+    trackers.emplace_back(0.01, 0.001, 2 * sigma, 1.0, -10.0, 10.0);
+  }
+  auto ucb = UCB(n, 3.0, 0.03 / n, reward, std::move(trackers));
   auto best_arm = ucb.best_arm();
   CAPTURE(n, ucb.n_pulls());
   REQUIRE(best_arm == n - 1);

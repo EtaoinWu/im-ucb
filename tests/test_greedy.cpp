@@ -59,8 +59,8 @@ TEST_CASE("Greedy on a simple graph", "[greedy]") {
   g.add_edge(4, 5, edge_weight);
 
   SECTION("Greedy") {
-    auto greedy = GreedyDiffusion(g, DiffusionType::IndependentCascade, 3, eps,
-                                  0.01, greedy_submodular<DiffusionEvaluate>);
+    auto greedy = DiffusionAlgoRun(g, DiffusionType::IndependentCascade, 3, eps,
+                                  0.01, greedy_submodular<DiffusionSubmodular>);
     auto result = greedy.run(1);
     CAPTURE(greedy.samples());
     REQUIRE_THAT(result, UnorderedRangeEquals({0, 3, 4}));
@@ -79,8 +79,8 @@ TEST_CASE("CELF on a simple graph", "[greedy]") {
   g.add_edge(4, 5, edge_weight);
 
   SECTION("Lazy Forward") {
-    auto celf = GreedyDiffusion(g, DiffusionType::IndependentCascade, 3, eps,
-                                0.01, greedy_lazy_forward<DiffusionEvaluate>);
+    auto celf = DiffusionAlgoRun(g, DiffusionType::IndependentCascade, 3, eps,
+                                0.01, greedy_lazy_forward<DiffusionSubmodular>);
     auto celf_result = celf.run(2);
     CAPTURE(celf.samples());
     REQUIRE_THAT(celf_result, UnorderedRangeEquals({0, 3, 4}));

@@ -2,11 +2,12 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 
 extern std::string identity;
 
-inline void my_log(const std::string &message) {
-  std::cout << identity << ": " << message << std::endl;
+inline auto my_log(std::string_view message) -> void {
+  std::cout << identity << ": " << message << '\n';
 }
 
-inline void set_identity(const std::string &id) { identity = id; }
+inline auto set_identity(std::string_view id) -> void { identity = id; }
