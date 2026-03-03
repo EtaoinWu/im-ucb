@@ -2,33 +2,33 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
+#include <concepts>
 #include <format>
+#include <limits>
+#include <vector>
 
 #include "diffusion.hpp"
 #include "graph.hpp"
 #include "log.hpp"
 #include "rng.hpp"
 
-using std::fill;
-using std::log;
-using std::max_element;
-using std::vector;
+namespace im {
 
 // submodular optimization framework
-// A submodular function is a function f: vector<int> -> double
+// A submodular function is a function f: std::vector<int> -> double
 // such that for any S, T, f(S) + f(T) >= f(S ∪ T) + f(S ∩ T)
 // A monotone submodular function is a submodular function that is
 // non-decreasing
 
 template <typename Fn>
-vector<int> greedy_submodular(const Fn &f, int n, int k) {
-  vector<char> selected(n, false);
-  vector<int> result;
+  requires std::invocable<Fn, std::vector<int>>
+std::vector<int> greedy_submodular(const Fn &f, int n, int k) {
+  std::vector<char> selected(n, false);
+  std::vector<int> result;
   for (int i = 1; i <= k; i++) {
     my_log(std::format("greedy_submodular i: {}", i));
     int best = -1;
-    double best_value = -1;
+    double best_value = -std::numeric_limits<double>::infinity();
     for (int j = 0; j < n; j++) {
       if (selected[j])
         continue;
@@ -50,21 +50,25 @@ vector<int> greedy_submodular(const Fn &f, int n, int k) {
 }
 
 template <typename Fn>
-vector<int> greedy_lazy_forward(const Fn &f, int n, int k) {
-  vector<char> selected(n, false);
-  vector<int> visited(n, 0);
-  vector<double> upper_bounds(n, +INFINITY);
-  vector<int> result;
+  requires requires(const Fn &fn, const std::vector<int> &a,
+                    const std::vector<int> &b) {
+    { fn(a, b) } -> std::convertible_to<double>;
+  }
+std::vector<int> greedy_lazy_forward(const Fn &f, int n, int k) {
+  std::vector<char> selected(n, false);
+  std::vector<int> visited(n, 0);
+  std::vector<double> upper_bounds(n, std::numeric_limits<double>::infinity());
+  std::vector<int> result;
   int time = 0;
   for (int i = 1; i <= k; i++) {
     my_log(std::format("greedy_lazy_forward i: {}", i));
     auto now = ++time;
     int next_element = -1;
     while (true) {
-      int max_ub = max_element(upper_bounds.begin(), upper_bounds.end()) -
+      int max_ub = std::max_element(upper_bounds.begin(), upper_bounds.end()) -
                    upper_bounds.begin();
       if (visited[max_ub] < now) {
-        auto value = f(vector{max_ub}, result);
+        auto value = f(std::vector{max_ub}, result);
         upper_bounds[max_ub] = value;
         visited[max_ub] = now;
       } else {
@@ -91,12 +95,13 @@ struct DiffusionEvaluate {
   int repeats;
   mutable RNG rng;
   mutable int n_eval = 0;
-  mutable vector<size_t> used_evals;
+  mutable std::vector<size_t> used_evals;
   DiffusionEvaluate(const Graph &g, DiffusionType type, int repeats)
       : g(g), type(type), repeats(repeats), rng() {}
   void seed(seed_type seed) { rng.seed(seed); }
-  double operator()(const vector<int> &origin,
-                    const vector<int> &prepare = {}) const {
+
+  [[nodiscard]] double operator()(const std::vector<int> &origin,
+                                  const std::vector<int> &prepare = {}) const {
     n_eval++;
     auto solver = DiffusionSolver(g, rng());
     double total = 0;
@@ -124,19 +129,22 @@ template <typename Greedy> struct GreedyDiffusion {
     std::cout << "n: " << g.n << std::endl;
     std::cout << "eps: " << eps << std::endl;
     std::cout << "delta: " << delta << std::endl;
-    std::cout << "repeats: " << g.n * g.n / (eps * eps) * log(g.n * g.n / delta)
+    std::cout << "repeats: "
+              << g.n * g.n / (eps * eps) * std::log(g.n * g.n / delta)
               << std::endl;
-    eval.repeats = g.n * g.n / (eps * eps) * log(g.n * g.n / delta);
+    eval.repeats = g.n * g.n / (eps * eps) * std::log(g.n * g.n / delta);
   }
 
-  vector<int> run(seed_type seed) {
+  [[nodiscard]] std::vector<int> run(seed_type seed) {
     eval.seed(seed);
     return greedy(eval, n, k);
   }
 
-  size_t samples() const { return size_t(eval.n_eval) * eval.repeats; }
+  [[nodiscard]] size_t samples() const {
+    return static_cast<size_t>(eval.n_eval) * eval.repeats;
+  }
 
-  vector<size_t> used_samples() const {
+  [[nodiscard]] std::vector<size_t> used_samples() const {
     auto samples = eval.used_evals;
     for (auto &sample : samples) {
       sample *= eval.repeats;
@@ -149,3 +157,10 @@ template <typename Greedy> struct GreedyDiffusion {
 template <typename Greedy>
 GreedyDiffusion(const Graph &g, DiffusionType diffusion_type, int k, double eps,
                 double delta, const Greedy &greedy) -> GreedyDiffusion<Greedy>;
+
+} // namespace im
+
+using im::DiffusionEvaluate;
+using im::GreedyDiffusion;
+using im::greedy_lazy_forward;
+using im::greedy_submodular;

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
 #include <format>
 #include <vector>
 
@@ -11,22 +9,23 @@
 #include "rng.hpp"
 #include "ucb.hpp"
 
-using std::vector;
+namespace im {
 
 struct DiffusionReward {
   DiffusionSolver &solver;
   DiffusionType type;
-  vector<int> fixed_vertices;
+  std::vector<int> fixed_vertices;
   mutable size_t samples;
-  vector<size_t> used_samples;
+  std::vector<size_t> used_samples;
   DiffusionReward(DiffusionSolver &solver, DiffusionType type,
-                  vector<int> fixed_vertices = {})
+                  std::vector<int> fixed_vertices = {})
       : solver(solver), type(type), fixed_vertices(fixed_vertices), samples(0),
         used_samples() {}
 
+  [[nodiscard]]
   double operator()(int i) const {
     samples++;
-    return solver.run(type, vector{i}, fixed_vertices);
+    return solver.run(type, std::vector{i}, fixed_vertices);
   }
 
   void checkpoint() { used_samples.push_back(samples); }
@@ -35,11 +34,11 @@ struct DiffusionReward {
 };
 
 template <typename Fn>
-vector<int> greedy_cb(Fn &f, int n, int k, double eps, double delta) {
+std::vector<int> greedy_cb(Fn &f, int n, int k, double eps, double delta) {
   auto lil = LILConfidence(0.03, delta / n, n / 2.0);
   UCB<LILConfidence, Fn> ucb(n, 3.0, 0.5, eps, lil, f, {}, true);
-  vector<char> selected(n, false);
-  vector<int> result;
+  std::vector<char> selected(n, false);
+  std::vector<int> result;
   for (int i = 1; i <= k; i++) {
     my_log(std::format("greedy_cb i: {}", i));
     ucb.reset();
@@ -57,11 +56,11 @@ vector<int> greedy_cb(Fn &f, int n, int k, double eps, double delta) {
 }
 
 template <typename Fn>
-vector<int> greedy_cb_lazy(Fn &f, int n, int k, double eps, double delta) {
+std::vector<int> greedy_cb_lazy(Fn &f, int n, int k, double eps, double delta) {
   auto lil = LILConfidence(0.03, delta / n, n / 2.0);
   UCB<LILConfidence, Fn> ucb(n, 3.0, 0.5, eps, lil, f, {}, true);
-  vector<char> selected(n, false);
-  vector<int> result;
+  std::vector<char> selected(n, false);
+  std::vector<int> result;
   for (int i = 1; i <= k; i++) {
     my_log(std::format("greedy_cb_lazy i: {}", i));
     auto x = ucb.best_arm();
@@ -83,13 +82,13 @@ template <typename GreedyCB> struct GreedyCBDiffusion {
   const GreedyCB &cb_fn;
   DiffusionSolver solver;
   size_t total_samples;
-  vector<size_t> used_samples_;
+  std::vector<size_t> used_samples_;
   GreedyCBDiffusion(const Graph &g, DiffusionType diffusion_type, int k,
                     double eps, double delta, const GreedyCB &cb_fn)
       : n(g.n), k(k), type(diffusion_type), eps(eps), delta(delta),
         cb_fn(cb_fn), solver(g, 0), total_samples(0), used_samples_() {}
 
-  vector<int> run(seed_type seed) {
+  [[nodiscard]] std::vector<int> run(seed_type seed) {
     solver.seed(seed);
     auto reward = DiffusionReward(solver, type);
     auto result = cb_fn(reward, n, k, eps, delta);
@@ -99,11 +98,18 @@ template <typename GreedyCB> struct GreedyCBDiffusion {
     return result;
   }
 
-  size_t samples() const { return total_samples; }
-  vector<size_t> used_samples() const { return used_samples_; }
+  [[nodiscard]] size_t samples() const { return total_samples; }
+  [[nodiscard]] std::vector<size_t> used_samples() const { return used_samples_; }
 };
 
 template <typename GreedyCB>
 GreedyCBDiffusion(const Graph &g, DiffusionType diffusion_type, int k,
                   double eps, double delta, const GreedyCB &cb_fn)
     -> GreedyCBDiffusion<GreedyCB>;
+
+} // namespace im
+
+using im::DiffusionReward;
+using im::GreedyCBDiffusion;
+using im::greedy_cb;
+using im::greedy_cb_lazy;

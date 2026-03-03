@@ -13,7 +13,7 @@ using Catch::Matchers::UnorderedRangeEquals;
 
 TEST_CASE("Greedy on simple functions", "[greedy]") {
   auto marginal = [](auto f) {
-    return [f](const vector<int> &S, const vector<int> &A) {
+    return [f](const std::vector<int> &S, const std::vector<int> &A) {
       auto SA = S;
       SA.reserve(S.size() + A.size());
       SA.insert(SA.end(), A.begin(), A.end());
@@ -21,8 +21,8 @@ TEST_CASE("Greedy on simple functions", "[greedy]") {
     };
   };
 
-  auto total = [](const vector<int> &S) {
-    vector<double> weights(S.size());
+  auto total = [](const std::vector<int> &S) {
+    std::vector<double> weights(S.size());
     for (size_t i = 0; i < S.size(); i++) {
       weights[i] = 1. / std::abs(S[i] - 7.3);
     }
@@ -33,7 +33,7 @@ TEST_CASE("Greedy on simple functions", "[greedy]") {
   result = greedy_lazy_forward(marginal(total), 11, 3);
   REQUIRE_THAT(result, UnorderedRangeEquals({6, 7, 8}));
 
-  auto total_halved = [](vector<int> S) {
+  auto total_halved = [](std::vector<int> S) {
     std::sort(S.begin(), S.end());
     double sum = 0;
     for (size_t i = 0; i < S.size(); i++) {

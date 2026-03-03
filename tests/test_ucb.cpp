@@ -8,9 +8,10 @@ using std::normal_distribution;
 
 struct GaussianReward {
   mutable RNG rng;
-  vector<double> means;
+  std::vector<double> means;
   double sigma;
-  GaussianReward(vector<double> means, double sigma, seed_type seed): rng(seed), means(means), sigma(sigma) {}
+  GaussianReward(std::vector<double> means, double sigma, seed_type seed)
+      : rng(seed), means(means), sigma(sigma) {}
   double operator()(int i) const {
     return normal_distribution<double>(means[i], sigma)(rng);
   }
@@ -18,7 +19,7 @@ struct GaussianReward {
 
 TEST_CASE("UCB with Gaussian rewards", "[ucb]") {
   auto n = GENERATE(3, 6, 12);
-  vector<double> means(n);
+  std::vector<double> means(n);
   for (int i = 0; i < n; i++) {
     means[i] = i * 1.0 / n;
   }

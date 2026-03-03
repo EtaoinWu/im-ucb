@@ -21,10 +21,10 @@ TEST_CASE("Basic graph operations", "[graph]") {
   SECTION("Basic edge access") {
     auto edges = g.get_edges();
     REQUIRE(edges.size() == 4);
-    REQUIRE(edges[0] == make_tuple(0, 1, 1.0));
-    REQUIRE(edges[1] == make_tuple(0, 2, 2.0));
-    REQUIRE(edges[2] == make_tuple(1, 2, 3.0));
-    REQUIRE(edges[3] == make_tuple(3, 4, 4.0));
+    REQUIRE((edges[0] == make_tuple(0, 1, 1.0)));
+    REQUIRE((edges[1] == make_tuple(0, 2, 2.0)));
+    REQUIRE((edges[2] == make_tuple(1, 2, 3.0)));
+    REQUIRE((edges[3] == make_tuple(3, 4, 4.0)));
   }
 
   SECTION("Neighbor access") {

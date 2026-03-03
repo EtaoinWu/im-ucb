@@ -1,23 +1,20 @@
 #pragma once
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <format>
+#include <limits>
+#include <numbers>
 #include <numeric>
 #include <vector>
-using std::accumulate;
-using std::exp;
-using std::log;
-using std::max;
-using std::max_element;
-using std::min;
-using std::sqrt;
-using std::vector;
 
 #include "log.hpp"
 
-const double E = exp(1.0);
-constexpr double infty = 1e100;
+namespace im {
+
+inline constexpr double E = std::numbers::e_v<double>;
+inline constexpr double infty = std::numeric_limits<double>::infinity();
 // A confidence function is a (double) -> double
 
 struct LILConfidence {
@@ -25,12 +22,14 @@ struct LILConfidence {
   double logkappap1;
   double logdelta;
   LILConfidence(double kappa, double delta, double sigma)
-      : mult((1 + sqrt(kappa)) * sigma * sqrt(2 * (1 + kappa))),
-        logkappap1(log(1 + kappa)), logdelta(log(delta)) {
+      : mult((1 + std::sqrt(kappa)) * sigma * std::sqrt(2 * (1 + kappa))),
+        logkappap1(std::log(1 + kappa)), logdelta(std::log(delta)) {
     assert(delta * E < logkappap1);
   }
-  double operator()(double t) const {
-    return mult * sqrt((log(logkappap1 + log(t)) - logdelta) / t);
+
+  [[nodiscard]] double operator()(double t) const {
+    return mult * std::sqrt((std::log(logkappap1 + std::log(t)) - logdelta) /
+                            t);
   }
 };
 
@@ -43,13 +42,14 @@ template <typename Confidence, typename Reward> struct UCB {
   double eps;
   const Confidence &conf;
   const Reward &reward;
-  vector<double> upper_bounds;
-  vector<double> sum_rewards;
-  vector<size_t> num_pulls;
-  vector<double> mean_rewards;
+  std::vector<double> upper_bounds;
+  std::vector<double> sum_rewards;
+  std::vector<size_t> num_pulls;
+  std::vector<double> mean_rewards;
   bool lazy;
   UCB(int n, double alpha, double beta, double eps, const Confidence &conf,
-      const Reward &reward, vector<double> upper_bounds = {}, bool lazy = false)
+      const Reward &reward, std::vector<double> upper_bounds = {},
+      bool lazy = false)
       : n(n), alpha(alpha), beta(beta), eps(eps), conf(conf), reward(reward),
         upper_bounds(upper_bounds), sum_rewards(n, 0), num_pulls(n, 0),
         mean_rewards(n, 0), lazy(lazy) {
@@ -57,20 +57,23 @@ template <typename Confidence, typename Reward> struct UCB {
       this->upper_bounds.resize(n, infty);
     }
   }
-  void reset() { fill(upper_bounds.begin(), upper_bounds.end(), infty); }
-  int n_pulls() const {
-    return accumulate(num_pulls.begin(), num_pulls.end(), 0);
+
+  void reset() { std::fill(upper_bounds.begin(), upper_bounds.end(), infty); }
+
+  [[nodiscard]] int n_pulls() const {
+    return std::accumulate(num_pulls.begin(), num_pulls.end(), 0);
   }
+
   int best_arm() {
     for (int i = 0; i < n; i++) {
       num_pulls[i] = 1;
       mean_rewards[i] = sum_rewards[i] = reward(i);
-      upper_bounds[i] =
-          min(upper_bounds[i],
-              sum_rewards[i] / num_pulls[i] + (1 + beta) * conf(num_pulls[i]));
+      upper_bounds[i] = std::min(
+          upper_bounds[i],
+          sum_rewards[i] / num_pulls[i] + (1 + beta) * conf(num_pulls[i]));
     }
     for (size_t t = n;; t++) {
-      auto j = max_element(mean_rewards.begin(), mean_rewards.end()) -
+      auto j = std::max_element(mean_rewards.begin(), mean_rewards.end()) -
                mean_rewards.begin();
       if (pull(j, t)) {
         my_log(std::format("UCB stops at round {} with arm {}", t, j));
@@ -78,7 +81,7 @@ template <typename Confidence, typename Reward> struct UCB {
       }
       auto upper_bounds_copy = upper_bounds[j];
       upper_bounds[j] = -infty;
-      auto i = max_element(upper_bounds.begin(), upper_bounds.end()) -
+      auto i = std::max_element(upper_bounds.begin(), upper_bounds.end()) -
                upper_bounds.begin();
       upper_bounds[j] = upper_bounds_copy;
       if (pull(i, t)) {
@@ -102,8 +105,8 @@ template <typename Confidence, typename Reward> struct UCB {
     sum_rewards[i] += r;
     num_pulls[i]++;
     mean_rewards[i] = sum_rewards[i] / num_pulls[i];
-    upper_bounds[i] =
-        min(upper_bounds[i], mean_rewards[i] + (1 + beta) * conf(num_pulls[i]));
+    upper_bounds[i] = std::min(upper_bounds[i],
+                   mean_rewards[i] + (1 + beta) * conf(num_pulls[i]));
     if (!lazy && num_pulls[i] >= 1 + alpha * (t - num_pulls[i])) {
       my_log("Due to num_pulls,");
       return true;
@@ -113,9 +116,9 @@ template <typename Confidence, typename Reward> struct UCB {
     for (int j = 0; j < n; j++) {
       if (j == i)
         continue;
-      max_other_upper =
-          max(max_other_upper,
-              min(upper_bounds[j], mean_rewards[j] + conf(num_pulls[j])));
+      max_other_upper = std::max(
+          max_other_upper,
+          std::min(upper_bounds[j], mean_rewards[j] + conf(num_pulls[j])));
     }
     if (my_lower > eps + max_other_upper) {
       my_log("Due to confidence bound,");
@@ -124,3 +127,10 @@ template <typename Confidence, typename Reward> struct UCB {
     return false;
   }
 };
+
+} // namespace im
+
+using im::E;
+using im::LILConfidence;
+using im::UCB;
+using im::infty;

@@ -8,8 +8,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(argparse)
 
-# Set C++20 standard
-set(CMAKE_CXX_STANDARD 20)
+# Set C++23 standard
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -23,9 +23,6 @@ add_compile_options(
 # Set debug/release flags
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast")
-
-# Static linking for GCC/Clang runtime
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
 
 # Include directories
 include_directories(include)

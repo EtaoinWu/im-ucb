@@ -5,6 +5,11 @@ We also include an optimization for both of them using confidence bounds.
 
 This is a course project for [CSCI 673](http://www.david-kempe.com/CS673/index.html).
 
+## Modern C++ API
+
+- Core symbols are provided in namespace `im`.
+- A module-friendly umbrella header is available at `include/im/all.hpp`.
+
 ## Usage
 
 To build, use `cmake`:

@@ -2,16 +2,15 @@
 
 #include <cassert>
 #include <random>
-#include <variant>
+#include <span>
 #include <vector>
-
-using std::variant;
-using std::vector;
 
 #include "graph.hpp"
 #include "rng.hpp"
 
-static std::uniform_real_distribution<double> u01(0.0, 1.0);
+namespace im {
+
+inline std::uniform_real_distribution<double> u01(0.0, 1.0);
 
 enum class DiffusionType {
   IndependentCascade,
@@ -22,9 +21,9 @@ struct DiffusionSolver {
   const Graph &g;
   RNG rng;
   size_t times;
-  vector<size_t> last_activated;
-  vector<int> queue;
-  vector<double> weights;
+  std::vector<size_t> last_activated;
+  std::vector<int> queue;
+  std::vector<double> weights;
   DiffusionSolver(const Graph &g, seed_type seed)
       : g(g), rng(seed), times(0), last_activated(g.n, 0), queue(g.n, -1),
         weights(g.n, 0.0) {}
@@ -32,9 +31,9 @@ struct DiffusionSolver {
   void seed(seed_type seed) { rng.seed(seed); }
 
 private:
-  template <typename iterator>
-  [[clang::always_inline]] iterator
-  pre_activate(iterator qr, const vector<int> &origin, size_t now) {
+  template <typename Iterator>
+  [[nodiscard]] Iterator pre_activate(Iterator qr, std::span<const int> origin,
+                                      size_t now) {
     for (auto u : origin) {
       if (last_activated[u] < now) {
         last_activated[u] = now;
@@ -44,12 +43,12 @@ private:
     return qr;
   }
 
-  template <typename iterator>
-  [[clang::always_inline]] iterator
-  independent_cascade(iterator ql, iterator qr, size_t now) {
+  template <typename Iterator>
+  [[nodiscard]] Iterator independent_cascade(Iterator ql, Iterator qr,
+                                             size_t now) {
     while (ql != qr) {
       int u = *ql++;
-      for (auto e : g[u]) {
+      for (const auto &e : g[u]) {
         int v = e.to;
         if (last_activated[v] < now && u01(rng) < e.weight) {
           last_activated[v] = now;
@@ -59,12 +58,13 @@ private:
     }
     return qr;
   }
-  template <typename iterator>
-  [[clang::always_inline]] iterator linear_threshold(iterator ql, iterator qr,
-                                                     size_t now, size_t then) {
+
+  template <typename Iterator>
+  [[nodiscard]] Iterator linear_threshold(Iterator ql, Iterator qr, size_t now,
+                                          size_t then) {
     while (ql != qr) {
       int u = *ql++;
-      for (auto e : g[u]) {
+      for (const auto &e : g[u]) {
         int v = e.to;
         if (last_activated[v] < now) {
           last_activated[v] = now;
@@ -83,28 +83,27 @@ private:
   }
 
 public:
-  [[clang::always_inline]] double
-  run_independent_cascade(const vector<int> &origin,
-                          const vector<int> &prepare = {}) {
+  [[nodiscard]] double run_independent_cascade(
+      const std::vector<int> &origin, const std::vector<int> &prepare = {}) {
     auto now = ++times;
 
     auto ql = queue.data();
     auto qr = queue.data();
 
     if (!prepare.empty()) {
-      qr = pre_activate(qr, prepare, now);
+      qr = pre_activate(qr, std::span<const int>(prepare), now);
       qr = independent_cascade(ql, qr, now);
       ql = qr;
     }
 
-    qr = pre_activate(qr, origin, now);
+    qr = pre_activate(qr, std::span<const int>(origin), now);
     qr = independent_cascade(ql, qr, now);
 
-    return qr - ql;
+    return static_cast<double>(qr - ql);
   }
-  [[clang::always_inline]] double
-  run_linear_threshold(const vector<int> &origin,
-                       const vector<int> &prepare = {}) {
+
+  [[nodiscard]] double run_linear_threshold(
+      const std::vector<int> &origin, const std::vector<int> &prepare = {}) {
     auto now = ++times;
     auto then = ++times;
 
@@ -112,20 +111,19 @@ public:
     auto qr = queue.data();
 
     if (!prepare.empty()) {
-      qr = pre_activate(qr, prepare, then);
+      qr = pre_activate(qr, std::span<const int>(prepare), then);
       qr = linear_threshold(ql, qr, now, then);
       ql = qr;
     }
 
-    qr = pre_activate(qr, origin, then);
+    qr = pre_activate(qr, std::span<const int>(origin), then);
     qr = linear_threshold(ql, qr, now, then);
 
-    return qr - ql;
+    return static_cast<double>(qr - ql);
   }
 
-  [[clang::always_inline]] double run(DiffusionType type,
-                                      const vector<int> &origin,
-                                      const vector<int> &prepare = {}) {
+  [[nodiscard]] double run(DiffusionType type, const std::vector<int> &origin,
+                           const std::vector<int> &prepare = {}) {
     switch (type) {
     case DiffusionType::IndependentCascade:
       return run_independent_cascade(origin, prepare);
@@ -133,6 +131,12 @@ public:
       return run_linear_threshold(origin, prepare);
     default:
       assert(false);
+      return 0.0;
     }
   }
 };
+
+} // namespace im
+
+using DiffusionType = im::DiffusionType;
+using DiffusionSolver = im::DiffusionSolver;
